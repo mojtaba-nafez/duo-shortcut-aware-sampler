@@ -131,19 +131,46 @@ def apply_rotary_pos_emb(qkv, cos, sin):
   return flash_attn.layers.rotary.apply_rotary_emb_qkv_(qkv, cos, sin)
 
 
-def regular_attention_multi_headed(q, k, v):
-  # Assuming qkv is a tensor with shape [batch, seq_len, 3, num_heads, head_dim]
-  # where the 3 represents Q, K, V packed in that order
+def regular_attention_multi_headed(q, k, v, layer_number=-1, remove_self_attn=False):
+  b, s, h, d = q.shape  # [B, S, H, D]
+
+  # (B, H, S, S) attention logits mask
+  diag_mask = torch.zeros((s, s), device=q.device, dtype=q.dtype)
+  diag_mask.fill_(0.0)
+
+  # if layer_number > 6 and layer_number <= 11:
+  if remove_self_attn and (layer_number > 6):
+  # if remove_self_attn:
+      diag_mask.fill_diagonal_(-torch.inf)
+
+  # expand to [B, H, S, S]
+  attn_mask = diag_mask.unsqueeze(0).unsqueeze(0).expand(b, h, s, s)
+
   attention_output = F.scaled_dot_product_attention(
-    query=q.transpose(1, 2),
+    query=q.transpose(1, 2),  # [B, H, S, D]
     key=k.transpose(1, 2),
     value=v.transpose(1, 2),
-    attn_mask=None,
+    attn_mask=attn_mask,
     dropout_p=0.0,
-    is_causal=False)
-  # [batch_size, seq_len, num_heads, head_dim]
+    is_causal=False
+  )
+
   attention_output = attention_output.transpose(1, 2)
   return einops.rearrange(attention_output, 'b s h d -> b s (h d)')
+
+# def regular_attention_multi_headed(q, k, v):
+#   # Assuming qkv is a tensor with shape [batch, seq_len, 3, num_heads, head_dim]
+#   # where the 3 represents Q, K, V packed in that order
+#   attention_output = F.scaled_dot_product_attention(
+#     query=q.transpose(1, 2),
+#     key=k.transpose(1, 2),
+#     value=v.transpose(1, 2),
+#     attn_mask=None,
+#     dropout_p=0.0,
+#     is_causal=False)
+#   # [batch_size, seq_len, num_heads, head_dim]
+#   attention_output = attention_output.transpose(1, 2)
+#   return einops.rearrange(attention_output, 'b s h d -> b s (h d)')
 
 
 #################################################################################
@@ -305,7 +332,7 @@ class DDiTBlockCausal(nn.Module):
 class DDiTBlock(nn.Module):
   def __init__(self, dim, n_heads, adaLN,
                cond_dim=None, mlp_ratio=4,
-               dropout=0.1):
+               dropout=0.1, layer_number=0):
     super().__init__()
     self.n_heads = n_heads
     self.adaLN = adaLN
@@ -322,6 +349,7 @@ class DDiTBlock(nn.Module):
       nn.Linear(mlp_ratio * dim, dim, bias=True))
     self.dropout2 = nn.Dropout(dropout)
     self.dropout = dropout
+    self.layer_number = layer_number 
 
     if self.adaLN:
       self.adaLN_modulation = nn.Linear(cond_dim, 6 * dim)
@@ -336,7 +364,7 @@ class DDiTBlock(nn.Module):
       return bias_dropout_add_scale_fused_inference
 
 
-  def forward(self, x, rotary_cos_sin, c=None):
+  def forward(self, x, rotary_cos_sin, c=None, remove_self_attn=False):
 
     bias_dropout_scale_fn = self._get_bias_dropout_scale()
 
@@ -358,7 +386,7 @@ class DDiTBlock(nn.Module):
       h=self.n_heads)
     q, k, v = split_and_apply_rotary_pos_emb(qkv, rotary_cos_sin)
     
-    x = regular_attention_multi_headed(q, k, v)
+    x = regular_attention_multi_headed(q, k, v, layer_number=self.layer_number, remove_self_attn=remove_self_attn)
 
     if self.adaLN:
       x = bias_dropout_scale_fn(self.attn_out(x),
@@ -445,7 +473,7 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     self.rotary_emb = Rotary(dim // config.model.n_heads)
 
     blocks = []
-    for _ in range(config.model.n_blocks):
+    for ii in range(config.model.n_blocks):
       if self.causal:
         block = DDiTBlockCausal(
           dim=dim,
@@ -457,7 +485,7 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
           n_heads=config.model.n_heads,
           cond_dim=cond_dim,
           adaLN=self.adaLN,
-          dropout=config.model.dropout)
+          dropout=config.model.dropout, layer_number=ii)
       blocks.append(block)
     self.blocks = nn.ModuleList(blocks)
 
@@ -474,9 +502,20 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     else:
       return  bias_dropout_add_scale_fused_inference
 
-  def forward(self, x, sigma, class_cond=None, weights=None):
+  def forward(self, x, sigma, class_cond=None, weights=None, mask_embedding_blending=False, remove_self_attn=False):
     assert class_cond is None, 'Not implemented for DiT'
+    indices = x.clone()
     x = self.vocab_embed(x, weights)
+    mask_id = 50257
+    mask_weight = 0.05
+    # mask_weight = 0.4
+    if mask_embedding_blending:
+        not_already_masked = (indices != mask_id).unsqueeze(-1)
+        mask_token_emb = self.vocab_embed(torch.full_like(indices, mask_id))
+        mixed_x = ((1 - mask_weight) * x) + (mask_weight * mask_token_emb)
+        x = mixed_x
+        # x = torch.where(not_already_masked, mixed_x, x)
+
     if self.causal:
       t_cond = None
     else:
@@ -485,7 +524,7 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     rotary_cos_sin = self.rotary_emb(x)
     with torch.amp.autocast('cuda', dtype=torch.bfloat16):
       for i in range(len(self.blocks)):
-        x = self.blocks[i](x, rotary_cos_sin, c=t_cond)
+        x = self.blocks[i](x, rotary_cos_sin, c=t_cond, remove_self_attn=remove_self_attn)
       x = self.output_layer(x, c=t_cond)
 
     return x

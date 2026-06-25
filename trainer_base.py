@@ -13,6 +13,8 @@ import metrics
 import models
 import utils
 
+import time
+import torch
 
 @dataclass
 class Loss:
@@ -79,6 +81,7 @@ class TrainerBase(L.LightningModule):
     tokenizer: transformers.PreTrainedTokenizer,
     vocab_size=None):
     super().__init__()
+    self.shortcut_removal = config.shortcut_removal
     self.save_hyperparameters()
     self.config = config
     if hasattr(self.config.algo, 'ignore_bos'):
@@ -290,7 +293,7 @@ class TrainerBase(L.LightningModule):
     with torch.amp.autocast('cuda', dtype=torch.float32):
       model_output = self.backbone(
         x=nn_input_idxs, sigma=sigma, class_cond=labels, 
-        weights=weights)
+        weights=weights, mask_embedding_blending=self.shortcut_removal, remove_self_attn=self.shortcut_removal)
     return self._process_model_output(
       model_output=model_output, xt=xt, sigma=sigma)
 
@@ -660,14 +663,11 @@ class Diffusion(TrainerBase):
     # Standard posterior q(x_s | x_t)
     p_x0, q_xs = self._get_ancestral_posterior(
       x, sigma, labels, alpha_s, alpha_t, p_x0)
-
     # Posterior targeting t=0, reuse predictions p_x0
     _, q_x0 = self._get_ancestral_posterior(
       x, sigma, labels, alpha_0, alpha_t, p_x0)
-
     # PC: forward-noise q_x0 back to time s
     pc_q_xs = self._forward_process(q_x0, alpha_s)
-
     q_sample = kappa * q_xs + (1 - kappa) * pc_q_xs
     return p_x0, sample_categorical(q_sample)
 

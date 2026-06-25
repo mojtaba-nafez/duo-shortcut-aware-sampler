@@ -1,13 +1,13 @@
-# MDLM psi-sampler with max-capped-eta mode (ReMDM cap)
+# MDLM psi-sampler with max-rescale-eta mode (ReMDM rescale)
 
-NUM_STEPS=256
-ETA=0.01
+NUM_STEPS=1724
+ETA=0.05
 NUCLEUS_P=0.9
 NOISE=log-linear
-CHECKPOINT_PATH=???
-DATA_CACHE_DIR=???
-EVAL_BATCH_SIZE=16
-NUM_SAMPLE_BATCHES=32
+CHECKPOINT_PATH="/home/nafez/scratch/remdm-shortcut-removal/weights/mdlm.ckpt"
+DATA_CACHE_DIR="/home/nafez/scratch/remdm-shortcut-removal/data"
+EVAL_BATCH_SIZE=8
+NUM_SAMPLE_BATCHES=2
 
 python -u -m main \
     mode=sample_eval \
@@ -23,8 +23,8 @@ python -u -m main \
     eval.checkpoint_path=$CHECKPOINT_PATH \
     loader.eval_batch_size=$EVAL_BATCH_SIZE \
     sampling.psi.time_profile=linear \
-    sampling.psi.high_mode=max-capped-$ETA \
-    sampling.psi.middle_mode=max-capped-$ETA \
-    sampling.psi.low_mode=max-capped-$ETA \
+    sampling.psi.high_mode=max-rescale-$ETA \
+    sampling.psi.middle_mode=max-rescale-$ETA \
+    sampling.psi.low_mode=max-rescale-$ETA \
     sampling.psi.high_frac=0.0 \
     sampling.psi.middle_frac=0.0

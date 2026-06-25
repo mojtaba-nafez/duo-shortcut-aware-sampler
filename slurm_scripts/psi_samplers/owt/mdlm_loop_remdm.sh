@@ -1,13 +1,13 @@
 # MDLM psi-sampler with constant-remdm-eta mode (ReMDM loop)
 
-NUM_STEPS=256
+NUM_STEPS=1024
 ETA=0.01
 NUCLEUS_P=0.95
 NOISE=log-linear
-CHECKPOINT_PATH=???
-DATA_CACHE_DIR=???
+CHECKPOINT_PATH="/home/nafez/scratch/remdm-shortcut-removal/weights/mdlm.ckpt"
+DATA_CACHE_DIR="/home/nafez/scratch/remdm-shortcut-removal/data"
 EVAL_BATCH_SIZE=16
-NUM_SAMPLE_BATCHES=32
+NUM_SAMPLE_BATCHES=2
 
 python -u -m main \
     mode=sample_eval \

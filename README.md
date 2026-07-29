@@ -23,7 +23,8 @@ python -u random_perturbation_experiment.py \
     sampling.psi.middle_mode=max-rescale-0.05 \
     sampling.psi.low_mode=max-rescale-0.05 \
     sampling.psi.high_frac=0.0 \
-    sampling.psi.middle_frac=0.0
+    sampling.psi.middle_frac=0.0 \
+    +shortcut_removal=True
 ```
 
 ## SEDD
@@ -48,7 +49,8 @@ python -u random_perturbation_experiment.py \
     sampling.psi.middle_mode=max-rescale-0.05 \
     sampling.psi.low_mode=max-rescale-0.05 \
     sampling.psi.high_frac=0.0 \
-    sampling.psi.middle_frac=0.0
+    sampling.psi.middle_frac=0.0 \
+    +shortcut_removal=True
 ```
 
 ## DOU

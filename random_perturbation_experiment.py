@@ -91,39 +91,6 @@ def _print_batch(config, train_ds, valid_ds, tokenizer, k=64):
 
 
 
-# def _generate_samples(diffusion_model, config, logger,
-#                       tokenizer):
-#     logger.info('Starting Sample Eval.')
-#     model = _load_from_checkpoint(
-#         diffusion_model=diffusion_model,
-#         config=config,
-#         tokenizer=tokenizer)
-#     model.metrics.gen_ppl.reset()
-#     model.metrics.sample_entropy.reset()
-#     if config.eval.disable_ema:
-#         logger.info('Disabling EMA.')
-#         model.ema = None
-#     stride_length = config.sampling.stride_length
-#     num_strides = config.sampling.num_strides
-#     all_samples = []
-
-  
-#     eps = 1e-5
-#     steps = 1024
-#     i = 1023
-#     timesteps = model._get_sampling_time_profile(eps, steps)
-
-#     x = torch.randint(1, 50257, (2, 1024))
-    
-#     t = timesteps[i] * torch.ones(x.shape[0], 1, device=model.device)
-#     _, alpha_t = model.noise(t)
-#     sigma = model._sigma_from_alphat(alpha_t)
-    
-#     log_x0_pred = model.forward(x, sigma)
-#     p_x0 = log_x0_pred.exp()
-    
-#     model.tokenizer
-
 import torch
 from pathlib import Path
 
@@ -139,141 +106,160 @@ def _generate_samples(diffusion_model, config, logger, tokenizer):
     if config.eval.disable_ema:
         logger.info('Disabling EMA.')
         model.ema = None
-    text = Path("/home/nafez/scratch/duo/text_clean.txt").read_text(encoding="utf-8")
-    token_ids = model.tokenizer.encode(text)
+    text = Path("/home/nafez/scratch/dllm-revision-sampler/text_clean.txt").read_text(encoding="utf-8")
+    token_ids = tokenizer.encode(text)
     chunk_size = 1024
-    vocab_size = model.tokenizer.vocab_size
+    vocab_size = tokenizer.vocab_size
     n_chunks = len(token_ids) // chunk_size
-    logger.info(
-        f"Loaded {len(token_ids)} tokens "
-        f"({n_chunks} chunks of {chunk_size})"
-    )
-
+    print(f"Loaded {len(token_ids)} tokens ({n_chunks} chunks of {chunk_size})")
+    # mask_id = tokenizer.mask_token_id
+    mask_id = 50257
     eps = 1e-5
     steps = 1024
     i = 1023
+    
     timesteps = model._get_sampling_time_profile(eps, steps)
 
+    # Tracking Variables (Pass-1, Pass-5, and Pass-10 counters)
     total_correct = 0
-    total_corrupted = 0
+    total_correct_top5 = 0
+    total_correct_top10 = 0
+    
     total_copy_correct = 0
-    total_clean_correct = 0
-    total_num_clean = 0
+    total_copy_correct_top5 = 0
+    total_copy_correct_top10 = 0
+    
+    total_corrupted = 0
+    total_clean = 0
+    
+    total_clean_token_correct = 0
+    total_clean_token_correct_top5 = 0
+    total_clean_token_correct_top10 = 0
+    
     model.eval()
-
     with torch.no_grad():
         for chunk_idx in range(n_chunks):
             start = chunk_idx * chunk_size
             end = start + chunk_size
-
             clean_tokens = torch.tensor(
                 token_ids[start:end],
                 dtype=torch.long,
                 device=model.device,
             ).unsqueeze(0)  # [1, 1024]
+            
             x = clean_tokens.clone()
-            # -------------------------------------------------
-            # Corrupt 20% of positions
-            # -------------------------------------------------
-            corruption_mask = (
-                torch.rand_like(x.float()) < 0.20
-            )
-
-            random_tokens = torch.randint(
-                low=0,
-                high=vocab_size,
-                size=x.shape,
-                device=x.device,
-            )
-            x[corruption_mask] = random_tokens[corruption_mask]
+            corruption_mask = (torch.rand_like(x.float()) < 0.20)
+            random_tokens = torch.randint(low=0, high=vocab_size, size=x.shape, device=x.device,)
+            # x[corruption_mask] = random_tokens[corruption_mask]
+            x[corruption_mask] = mask_id
+            
             num_corrupted = corruption_mask.sum().item()
             num_clean = (~corruption_mask).sum().item()
+            
             if num_corrupted == 0:
                 continue
+                
             t = timesteps[i] * torch.ones(x.shape[0], 1, device=model.device)
             _, alpha_t = model.noise(t)
             sigma = model._sigma_from_alphat(alpha_t)
             sigma = model._process_sigma(sigma)
 
             with torch.amp.autocast('cuda', dtype=torch.float32):
-                # pred_tokens = model.backbone(x=x, sigma=sigma, class_cond=None, weights=None, mask_embedding_blending=False, remove_self_attn=False).argmax(dim=-1)
-                # pred_tokens = model.backbone(x=x, sigma=sigma, class_cond=None, weights=None, mask_embedding_blending=True, remove_self_attn=False).argmax(dim=-1)
-                # pred_tokens = model.backbone(x=x, sigma=sigma, class_cond=None, weights=None, mask_embedding_blending=False, remove_self_attn=True).argmax(dim=-1)
-                pred_tokens = model.backbone(x=x, sigma=sigma, class_cond=None, weights=None, mask_embedding_blending=True, remove_self_attn=True).argmax(dim=-1)
+                # logits = model.backbone(x=x, sigma=sigma, class_cond=None, weights=None, mask_embedding_blending=False, remove_self_attn=False)#.argmax(dim=-1)
+                # logits = model.backbone(x=x, sigma=sigma, class_cond=None, weights=None, mask_embedding_blending=True, remove_self_attn=False)#.argmax(dim=-1)
+                # logits = model.backbone(x=x, sigma=sigma, class_cond=None, weights=None, mask_embedding_blending=False, remove_self_attn=True)#.argmax(dim=-1)
+                logits = model.backbone(x=x, sigma=sigma, class_cond=None, weights=None, mask_embedding_blending=True, remove_self_attn=True)# .argmax(dim=-1)
 
             
+            # logits = torch.where(~corruption_mask.unsqueeze(-1), logits, torch.tensor(-float('inf'), device=logits.device))
+            # --- PASS-1 PREDICTIONS ---
+            pred_tokens = logits.argmax(dim=-1)
+            
+            # --- TOP-K PREDICTIONS (K=10 covers both top-5 and top-10) ---
+            top10_preds = logits.topk(k=10, dim=-1).indices # Shape: [1, 1024, 10]
+            
+            # Broadcast masks for Top-5 and Top-10 evaluations
+            # Slicing top10_preds[:, :, :5] gives the top 5 indices efficiently
+            correct_top5_mask = (top10_preds[:, :, :5] == clean_tokens.unsqueeze(-1)).any(dim=-1)
+            correct_top10_mask = (top10_preds == clean_tokens.unsqueeze(-1)).any(dim=-1)
+            
+            copy_top5_mask = (top10_preds[:, :, :5] == x.unsqueeze(-1)).any(dim=-1)
+            copy_top10_mask = (top10_preds == x.unsqueeze(-1)).any(dim=-1)
+            
+            # --- TALLYING PASS-1 ---
             correct = ((pred_tokens == clean_tokens) & corruption_mask).sum().item()
-            copy_correct = ((x == pred_tokens) & corruption_mask).sum().item()
-            clean_correct = ((clean_tokens == pred_tokens) & (~corruption_mask)).sum().item()
+            copy_correct = ((pred_tokens == x) & corruption_mask).sum().item()
+            clean_token_correct = ((pred_tokens == clean_tokens) & (~corruption_mask)).sum().item()
             
-
-            '''
-            corrupted_x = x[corruption_mask]
-            corrupted_clean = clean_tokens[corruption_mask]
-            corrupted_pred_tokens = pred_tokens[corruption_mask]
-            print("\nFirst 20 corrupted positions:")
-            for i in range(min(20, len(corrupted_x))):
-                input_id = corrupted_x[i].item()
-                target_id = corrupted_clean[i].item()
-                pred_id = corrupted_pred_tokens[i].item()
-                input_text = model.tokenizer.decode([input_id])
-                target_text = model.tokenizer.decode([target_id])
-                pred_text = model.tokenizer.decode([pred_id])
-                print(
-                    f"{i:02d}: "
-                    f"input(x)={input_id:6d} ({repr(input_text)})  "
-                    f"-> target={target_id:6d} ({repr(target_text)})  "
-                    f"-> pred={pred_id:6d} ({repr(pred_text)})"
-                )
-            '''
-
-
-            total_copy_correct += copy_correct
+            # --- TALLYING PASS-5 ---
+            correct_top5 = (correct_top5_mask & corruption_mask).sum().item()
+            copy_correct_top5 = (copy_top5_mask & corruption_mask).sum().item()
+            clean_token_correct_top5 = (correct_top5_mask & (~corruption_mask)).sum().item()
+            
+            # --- TALLYING PASS-10 ---
+            correct_top10 = (correct_top10_mask & corruption_mask).sum().item()
+            copy_correct_top10 = (copy_top10_mask & corruption_mask).sum().item()
+            clean_token_correct_top10 = (correct_top10_mask & (~corruption_mask)).sum().item()
+            
+            # --- ACCUMULATION ---
             total_correct += correct
+            total_correct_top5 += correct_top5
+            total_correct_top10 += correct_top10
+            
+            total_copy_correct += copy_correct
+            total_copy_correct_top5 += copy_correct_top5
+            total_copy_correct_top10 += copy_correct_top10
+            
             total_corrupted += num_corrupted
-
-            total_clean_correct += clean_correct
-            total_num_clean += num_clean
-
-            if chunk_idx % 100 == 0:
-                acc = total_correct / max(total_corrupted, 1)
-                logger.info(
-                    f"Chunk {chunk_idx}/{n_chunks} "
-                    f"Acc={acc:.4f}"
-                )
-
-    final_acc = 100 * total_correct / max(total_corrupted, 1)
-    model_acc = 100 * total_correct / total_corrupted
-    copy_acc = 100 * total_copy_correct / total_corrupted
-
-    clean_acc = 100 * total_clean_correct / total_num_clean
-    overall_acc = 100 * (total_correct+total_clean_correct) / (total_corrupted+total_num_clean)
-
+            total_clean += num_clean
+            
+            total_clean_token_correct += clean_token_correct
+            total_clean_token_correct_top5 += clean_token_correct_top5
+            total_clean_token_correct_top10 += clean_token_correct_top10
+            
+    # Calculate Final Percentages
+    model_acc = 100 * total_correct / max(total_corrupted, 1)
+    model_acc_top5 = 100 * total_correct_top5 / max(total_corrupted, 1)
+    model_acc_top10 = 100 * total_correct_top10 / max(total_corrupted, 1)
     
-
-
-    logger.info("===============Final Results===============")
-    logger.info(
-        f"Denoising Accuracy (Prediction == Ground Truth on Corrupted Tokens): "
-        f"{model_acc:.6f} ({total_correct}/{total_corrupted})"
+    copy_acc = 100 * total_copy_correct / max(total_corrupted, 1)
+    copy_acc_top5 = 100 * total_copy_correct_top5 / max(total_corrupted, 1)
+    copy_acc_top10 = 100 * total_copy_correct_top10 / max(total_corrupted, 1)
+    
+    clean_acc = 100 * total_clean_token_correct / max(total_clean, 1)
+    clean_acc_top5 = 100 * total_clean_token_correct_top5 / max(total_clean, 1)
+    clean_acc_top10 = 100 * total_clean_token_correct_top10 / max(total_clean, 1)
+    
+    overall_acc = 100 * (total_clean_token_correct + total_correct) / (total_corrupted + total_clean)
+    overall_acc_top5 = 100 * (total_clean_token_correct_top5 + total_correct_top5) / (total_corrupted + total_clean)
+    overall_acc_top10 = 100 * (total_clean_token_correct_top10 + total_correct_top10) / (total_corrupted + total_clean)
+    
+    print("===============Final Results===============")
+    print(
+        f"Denoising Accuracy (Corrupted Tokens):\n"
+        f"  Pass-1:  {model_acc:.6f}% ({total_correct}/{total_corrupted})\n"
+        f"  Pass-5:  {model_acc_top5:.6f}% ({total_correct_top5}/{total_corrupted})\n"
+        f"  Pass-10: {model_acc_top10:.6f}% ({total_correct_top10}/{total_corrupted})"
+    )
+    print(
+        f"Copying Rate (Corrupted Input -> Output):\n"
+        f"  Pass-1:  {copy_acc:.6f}% ({total_copy_correct}/{total_corrupted})\n"
+        f"  Pass-5:  {copy_acc_top5:.6f}% ({total_copy_correct_top5}/{total_corrupted})\n"
+        f"  Pass-10: {copy_acc_top10:.6f}% ({total_copy_correct_top10}/{total_corrupted})"
+    )
+    print(
+        f"Clean Accuracy (Clean Tokens):\n"
+        f"  Pass-1:  {clean_acc:.6f}% ({total_clean_token_correct}/{total_clean})\n"
+        f"  Pass-5:  {clean_acc_top5:.6f}% ({total_clean_token_correct_top5}/{total_clean})\n"
+        f"  Pass-10: {clean_acc_top10:.6f}% ({total_clean_token_correct_top10}/{total_clean})"
+    )
+    print(
+        f"Overall Accuracy (All Tokens):\n"
+        f"  Pass-1:  {overall_acc:.6f}% ({(total_clean_token_correct + total_correct)}/{(total_corrupted + total_clean)})\n"
+        f"  Pass-5:  {overall_acc_top5:.6f}% ({(total_clean_token_correct_top5 + total_correct_top5)}/{(total_corrupted + total_clean)})\n"
+        f"  Pass-10: {overall_acc_top10:.6f}% ({(total_clean_token_correct_top10 + total_correct_top10)}/{(total_corrupted + total_clean)})"
     )
 
-    logger.info(
-        f"Copying Rate (Prediction == Corrupted Input on Corrupted Tokens): "
-        f"{copy_acc:.6f} ({total_copy_correct}/{total_corrupted})"
-    )
-    logger.info(
-        f"Clean Acc (Prediction == Input on Clean Tokens): "
-        f"{clean_acc:.6f} ({total_clean_correct}/{total_num_clean})"
-    )
-
-    logger.info(
-            f"Overall Acc (Prediction == Input): "
-            f"{overall_acc:.6f} ({ (total_correct+total_clean_correct)}/{(total_corrupted+total_num_clean)})"
-        )
-
-  
-    return final_acc
 
 
 @hydra.main(version_base=None, config_path='configs',

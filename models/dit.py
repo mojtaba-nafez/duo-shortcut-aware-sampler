@@ -503,11 +503,12 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
       return  bias_dropout_add_scale_fused_inference
 
   def forward(self, x, sigma, class_cond=None, weights=None, mask_embedding_blending=False, remove_self_attn=False):
+    # print(mask_embedding_blending, remove_self_attn)
     assert class_cond is None, 'Not implemented for DiT'
     indices = x.clone()
     x = self.vocab_embed(x, weights)
     mask_id = 50257
-    mask_weight = 0.05
+    mask_weight = 0.35
     # mask_weight = 0.4
     if mask_embedding_blending:
         not_already_masked = (indices != mask_id).unsqueeze(-1)

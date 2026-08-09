@@ -22,6 +22,8 @@ class Loss:
   nlls: torch.FloatTensor
   prior_loss: torch.FloatTensor
   num_tokens: torch.FloatTensor
+  kl_gaussian: torch.FloatTensor
+  kl_dirichlet: torch.FloatTensor
 
 
 class LogLinear(torch.nn.Module):
@@ -82,6 +84,7 @@ class TrainerBase(L.LightningModule):
     vocab_size=None):
     super().__init__()
     self.shortcut_removal = config.shortcut_removal
+    self.latent_noise = config.latent_noise
     self.save_hyperparameters()
     self.config = config
     if hasattr(self.config.algo, 'ignore_bos'):
@@ -285,7 +288,7 @@ class TrainerBase(L.LightningModule):
     raise NotImplementedError
 
   def forward(self, xt, sigma, labels=None, weights=None,
-              nn_input_idxs=None):
+              nn_input_idxs=None, kl_loss=False):
     if nn_input_idxs is None:
       nn_input_idxs = xt
 
@@ -293,7 +296,7 @@ class TrainerBase(L.LightningModule):
     with torch.amp.autocast('cuda', dtype=torch.float32):
       model_output = self.backbone(
         x=nn_input_idxs, sigma=sigma, class_cond=labels, 
-        weights=weights, mask_embedding_blending=self.shortcut_removal, remove_self_attn=self.shortcut_removal)
+        weights=weights, mask_embedding_blending=self.shortcut_removal, remove_self_attn=self.shortcut_removal, latent_noise=self.latent_noise, kl_loss=kl_loss)
     return self._process_model_output(
       model_output=model_output, xt=xt, sigma=sigma)
 
@@ -303,27 +306,45 @@ class TrainerBase(L.LightningModule):
     assert self.metrics.train_nlls.nll.weight == 0
 
   def training_step(self, batch, batch_idx):
-    current_accumulation_step = (
-      batch_idx % self.trainer.accumulate_grad_batches)
+    current_accumulation_step = (batch_idx % self.trainer.accumulate_grad_batches)
     losses = self._loss(batch['input_ids'],
                         batch.get('labels', None),
                         batch['attention_mask'],
                         current_accumulation_step,
                         train_mode=True)
-    self.metrics.update_train(losses.nlls, losses.prior_loss,
-                              losses.num_tokens)
+    # self.metrics.update_train(losses.nlls, losses.prior_loss, losses.num_tokens, losses.kl_gaussian, losses.kl_dirichlet)        
+    self.metrics.update_train(losses.nlls, losses.prior_loss, losses.num_tokens)
+    batch_size = batch['input_ids'].shape[0]
     self.log(name='trainer/loss',
              value=losses.loss.item(),
              on_step=True,
              on_epoch=False,
              sync_dist=True)
+    self.log(
+        'train/kl_gaussian',
+        losses.kl_gaussian.detach(),
+        on_step=True,
+        on_epoch=True,
+        sync_dist=True,
+        batch_size=batch_size,
+    )
+
+    self.log(
+        'train/kl_dirichlet',
+        losses.kl_dirichlet.detach(),
+        on_step=True,
+        on_epoch=True,
+        sync_dist=True,
+        batch_size=batch_size,
+    )
     return losses.loss
 
   def on_train_epoch_end(self):
-    for k, v in self.metrics.valid_nlls.items():
+    # for k, v in self.metrics.valid_nlls.items():
+    for k, v in self.metrics.train_nlls.items():
       self.log(name=k, value=v.compute(), on_step=False,
                on_epoch=True, sync_dist=True)
-
+  
   def on_validation_epoch_start(self):
     self.metrics.reset()
     self._eval_mode()
@@ -335,14 +356,34 @@ class TrainerBase(L.LightningModule):
     losses = self._loss(batch['input_ids'],
                         batch.get('labels', None),
                         batch['attention_mask'])
-    self.metrics.update_valid(losses.nlls, losses.prior_loss,
-                              losses.num_tokens)
+    self.metrics.update_valid(losses.nlls, losses.prior_loss, losses.num_tokens)
+    # self.metrics.update_valid(losses.nlls, losses.prior_loss, losses.num_tokens, losses.kl_gaussian, losses.kl_dirichlet)
+    batch_size = batch['input_ids'].shape[0]
+
+    self.log(
+        'val/kl_gaussian',
+        losses.kl_gaussian.detach(),
+        on_step=False,
+        on_epoch=True,
+        sync_dist=True,
+        batch_size=batch_size,
+    )
+
+    self.log(
+        'val/kl_dirichlet',
+        losses.kl_dirichlet.detach(),
+        on_step=False,
+        on_epoch=True,
+        sync_dist=True,
+        batch_size=batch_size,
+    )
     return losses.loss
 
   def on_validation_epoch_end(self):
     for k, v in self.metrics.valid_nlls.items():
       self.log(name=k,  value=v.compute(), on_step=False,
                on_epoch=True, sync_dist=True)
+    
     if ((self.config.eval.compute_perplexity_on_sanity
          or not self.trainer.sanity_checking)
          and self.config.eval.generate_samples):
@@ -436,10 +477,46 @@ class TrainerBase(L.LightningModule):
     num_tokens = valid_tokens.sum()
     token_nll = nlls / num_tokens
 
-    return Loss(loss=token_nll,
-                nlls=nlls,
-                prior_loss=0.0,
-                num_tokens=num_tokens)
+
+    # ---- NVIB KL regularization ----
+    total_kl_gaussian = torch.tensor(0.0, device=loss.device, dtype=loss.dtype)
+    total_kl_dirichlet = torch.tensor(0.0, device=loss.device, dtype=loss.dtype)
+
+    if hasattr(self.config.model, "nvib_layers") and len(self.config.model.nvib_layers) > 0:
+        for layer_id in self.config.model.nvib_layers:
+            kl_gaussian, kl_dirichlet = self.backbone.blocks[layer_id].get_kl_div()
+            total_kl_gaussian += kl_gaussian.mean()
+            total_kl_dirichlet += kl_dirichlet.mean()
+
+        total_kl_gaussian /= len(self.config.model.nvib_layers)
+        total_kl_dirichlet /= len(self.config.model.nvib_layers)
+
+        # add to the scalar objective
+        token_nll = (
+            token_nll
+            + self.config.model.get("nvib_lambda_klg", 0.0) * total_kl_gaussian
+            + self.config.model.get("nvib_lambda_kld", 0.0) * total_kl_dirichlet
+        )
+        return Loss(
+          loss=token_nll,
+          nlls=nlls,
+          kl_gaussian=total_kl_gaussian,
+          kl_dirichlet=total_kl_dirichlet,
+          prior_loss=0.0,
+          num_tokens=num_tokens,
+        )
+    return Loss(
+        loss=token_nll,
+        nlls=nlls,
+        prior_loss=0.0,
+        num_tokens=num_tokens,
+        kl_gaussian=torch.tensor(0.0, device=token_nll.device, dtype=token_nll.dtype),
+        kl_dirichlet=torch.tensor(0.0, device=token_nll.device, dtype=token_nll.dtype),
+    )
+    # return Loss(loss=token_nll,
+    #             nlls=nlls,
+    #             prior_loss=0.0,
+    #             num_tokens=num_tokens)
 
 
 class Diffusion(TrainerBase):
@@ -530,7 +607,7 @@ class Diffusion(TrainerBase):
                            self.num_classes, labels)
     else:
       assert labels is None
-    log_x_theta = self.forward(xt, sigma=sigma, labels=labels)
+    log_x_theta = self.forward(xt, sigma=sigma, labels=labels, kl_loss=True)
     utils.print_nans(log_x_theta, 'model_output')
     return self.nll_per_token(
       log_x_theta=log_x_theta,

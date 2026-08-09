@@ -99,3 +99,63 @@ runai submit \
     "
 ```
 
+
+# Eval (Activate Random-Noise or Diagonal-Masking in Middle Layers)
+
+## base sampler
+```bash
+python main.py \
+  mode=sample_eval \
+  loader.batch_size=2 \
+  loader.eval_batch_size=8 \
+  data=openwebtext-split \
+  algo=duo_base \
+  eval.checkpoint_path=/idiap/temp/mnafez/research/duo/weights/duo.ckpt \
+  sampling.steps=1024 \
+  sampling.num_sample_batches=1 \
+  sampling.noise_removal=greedy \
+  +wandb.offline=true \
+  +shortcut_removal=False \
+  +latent_noise=False
+```
+
+
+## Ψ-SAMPLER
+
+```bash
+python -u -m main \
+    mode=sample_eval \
+    data=openwebtext-split \
+    data.cache_dir=/idiap/temp/mnafez/research/duo/data \
+    model=small \
+    algo=duo_base \
+    noise=log-linear \
+    sampling.predictor=psi \
+    sampling.steps=1024 \
+    sampling.p_nucleus=0.9 \
+    sampling.num_sample_batches=2 \
+    eval.checkpoint_path=/idiap/temp/mnafez/research/duo/weights/duo.ckpt \
+    loader.eval_batch_size=8 \
+    sampling.psi.time_profile=linear \
+    sampling.psi.high_mode=max-rescale-0.05 \
+    sampling.psi.middle_mode=max-rescale-0.05 \
+    sampling.psi.low_mode=max-rescale-0.05 \
+    sampling.psi.high_frac=0.0 \
+    sampling.psi.middle_frac=0.0 \
+    +shortcut_removal=False \
+    +latent_noise=True
+```
+
+
+# Training
+
+```bash
+python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=34000 +shortcut_removal=False  +latent_noise=False trainer.max_steps=68000 checkpointing.resume_from_ckpt=false model.nvib_layers=[4,6,8] trainer.val_check_interval=30000 trainer.limit_val_batches=1000
+```
+
+
+
+
+<!-- 
+python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=34000 +shortcut_removal=False  +latent_noise=False trainer.max_steps=2 checkpointing.resume_from_ckpt=false model.nvib_layers=[4,6,8] trainer.val_check_interval=15 trainer.limit_val_batches=100
+  -->

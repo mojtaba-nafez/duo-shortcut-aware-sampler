@@ -105,7 +105,7 @@ def wt_detokenizer(string):
   string = string.replace(" @-@ ", "-")
   string = string.replace(" @,@ ", ",")
   string = string.replace(" @.@ ", ".")
-  # punctuation
+  # punctuationdataloader
   string = string.replace(" : ", ": ")
   string = string.replace(" ; ", "; ")
   string = string.replace(" . ", ". ")

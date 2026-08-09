@@ -9,3 +9,6 @@ scale_by_sigma: True
 dropout: 0.1
 temb_strategy: adaln 
 tie_word_embeddings: False
+nvib_layers: [] # [4, 6, 8] # [8, 10, 12, 14, 16, 18, 20]
+nvib_lambda_klg: 1e-6
+nvib_lambda_kld: 1e-6

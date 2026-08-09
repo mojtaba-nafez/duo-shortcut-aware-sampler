@@ -194,6 +194,35 @@ def _train(diffusion_model, config, logger, tokenizer):
 
   train_ds, valid_ds = dataloader.get_dataloaders(
     config, tokenizer)
+  
+  # =================================================
+  # DEBUG SMALL TRAINING DATASET
+  # =================================================
+  from torch.utils.data import DataLoader, Subset
+
+  num_debug_samples = 1000
+
+  small_train_dataset = Subset(
+      train_ds.dataset,
+      range(min(num_debug_samples, len(train_ds.dataset)))
+  )
+
+  train_ds = DataLoader(
+      small_train_dataset,
+      batch_size=train_ds.batch_size,
+      shuffle=True,
+      num_workers=train_ds.num_workers,
+      pin_memory=train_ds.pin_memory,
+      collate_fn=train_ds.collate_fn,
+      drop_last=train_ds.drop_last,
+  )
+
+  print("====================================")
+  print(f"DEBUG DATASET SIZE = {len(small_train_dataset)}")
+  print(f"DEBUG NUM BATCHES  = {len(train_ds)}")
+  print("====================================")
+
+
   _print_batch(config, train_ds, valid_ds, tokenizer)
 
   if config.training.finetune_path != '':

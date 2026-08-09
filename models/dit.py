@@ -9,6 +9,7 @@ import omegaconf
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from models.DDiT_NVIB_block import DDiT_NVIB_Block
 
 # Flags required to enable jit fusion kernels
 torch._C._jit_set_profiling_mode(False)
@@ -364,7 +365,7 @@ class DDiTBlock(nn.Module):
       return bias_dropout_add_scale_fused_inference
 
 
-  def forward(self, x, rotary_cos_sin, c=None, remove_self_attn=False):
+  def forward(self, x, rotary_cos_sin, c=None, remove_self_attn=False, kl_loss=False, use_trained_scaling_factor=False, activate_nvib_noise=False):
 
     bias_dropout_scale_fn = self._get_bias_dropout_scale()
 
@@ -479,6 +480,13 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
           dim=dim,
           n_heads=config.model.n_heads,
           dropout=config.model.dropout)
+      elif ii in config.model.nvib_layers:
+        block = DDiT_NVIB_Block(
+          dim=dim,
+          n_heads=config.model.n_heads,
+          cond_dim=cond_dim,
+          adaLN=self.adaLN,
+          dropout=config.model.dropout, layer_number=ii)
       else:
         block = DDiTBlock(
           dim=dim,
@@ -502,11 +510,11 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     else:
       return  bias_dropout_add_scale_fused_inference
 
-  def forward(self, x, sigma, class_cond=None, weights=None, mask_embedding_blending=False, remove_self_attn=False):
-    # print(mask_embedding_blending, remove_self_attn)
+  def forward(self, x, sigma, class_cond=None, weights=None, mask_embedding_blending=False, remove_self_attn=False, latent_noise=False, kl_loss=False, use_trained_scaling_factor=False, activate_nvib_noise=False):
     assert class_cond is None, 'Not implemented for DiT'
     indices = x.clone()
     x = self.vocab_embed(x, weights)
+    '''
     mask_id = 50257
     mask_weight = 0.35
     # mask_weight = 0.4
@@ -516,7 +524,7 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         mixed_x = ((1 - mask_weight) * x) + (mask_weight * mask_token_emb)
         x = mixed_x
         # x = torch.where(not_already_masked, mixed_x, x)
-
+    '''
     if self.causal:
       t_cond = None
     else:
@@ -525,7 +533,14 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     rotary_cos_sin = self.rotary_emb(x)
     with torch.amp.autocast('cuda', dtype=torch.bfloat16):
       for i in range(len(self.blocks)):
-        x = self.blocks[i](x, rotary_cos_sin, c=t_cond, remove_self_attn=remove_self_attn)
+        if latent_noise:
+          if i in [4, 5, 6, 7, 8]: # N10
+            std = x.std(unbiased=False).detach()
+            # noise_std = 0.07 # N10 original
+            noise_std = 0.02 # N12
+            x = x + torch.randn_like(x) * (noise_std * std)
+        
+        x = self.blocks[i](x, rotary_cos_sin, c=t_cond, remove_self_attn=remove_self_attn, kl_loss=kl_loss, use_trained_scaling_factor=use_trained_scaling_factor, activate_nvib_noise=activate_nvib_noise)
       x = self.output_layer(x, c=t_cond)
 
     return x

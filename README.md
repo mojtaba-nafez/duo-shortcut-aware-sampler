@@ -149,13 +149,70 @@ python -u -m main \
 
 # Training
 
+## 4 GPU
 ```bash
-python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=34000 +shortcut_removal=False  +latent_noise=False trainer.max_steps=68000 checkpointing.resume_from_ckpt=false model.nvib_layers=[4,6,8] trainer.val_check_interval=30000 trainer.limit_val_batches=1000
+ CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=34000 +shortcut_removal=False  +latent_noise=False trainer.max_steps=68000 checkpointing.resume_from_ckpt=false model.nvib_layers=[4,6,8] trainer.val_check_interval=12000 trainer.limit_val_batches=1000 trainer.devices=4  loader.num_workers=16
+```
++ trainer.max_steps=68000    --> number of optimizer step --> (num of GPUs)*(Per Batch Size)*(acuumulation)
++ trainer.val_check_interval --> based on number of dataloader batch --> (num of GPUs)*(Per Batch Size)
++ Epoch 0:   0%|▏         | 80/68360 [00:26<6:22:36,  2.97it/s, v_num=wt_1] --> 68360: total dataloader batch (num of GPUs)*(Per Batch Size)
+
+17.8B :    68000*512*512 = ~17.8B
+
+## 8 GPU
+```bash
+ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=34000 +shortcut_removal=False  +latent_noise=False trainer.max_steps=68000 checkpointing.resume_from_ckpt=false model.nvib_layers=[4,6,8] trainer.val_check_interval=6000 trainer.limit_val_batches=1000 trainer.devices=4 trainer.num_nodes=2  loader.num_workers=16
 ```
 
 
 
 
+
+
+sbatch --environment=gidd --nodes=2 -A a0236 --time=0-00:20:00 slurm_scripts/cscs/training/duo_owt_8gpu.sh
+
+
+
+
 <!-- 
-python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=34000 +shortcut_removal=False  +latent_noise=False trainer.max_steps=2 checkpointing.resume_from_ckpt=false model.nvib_layers=[4,6,8] trainer.val_check_interval=15 trainer.limit_val_batches=100
-  -->
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=50 +shortcut_removal=False  +latent_noise=False trainer.max_steps=2 checkpointing.resume_from_ckpt=false model.nvib_layers=[] trainer.val_check_interval=15 trainer.limit_val_batches=0 loader.num_workers=16
+-->
+
+CUDA_VISIBLE_DEVICES=0,1 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt-debug   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2   algo.curriculum.start=0   algo.curriculum.end=50   +shortcut_removal=False   +latent_noise=False   trainer.max_steps=2   checkpointing.resume_from_ckpt=false   model.nvib_layers=[]   trainer.limit_val_batches=0   loader.num_workers=1   trainer.devices=2   trainer.accumulate_grad_batches=4   trainer.log_every_n_steps=1
+
+
+
+ CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt-debug   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2   algo.curriculum.start=0   algo.curriculum.end=50   +shortcut_removal=False   +latent_noise=False   trainer.max_steps=2   checkpointing.resume_from_ckpt=false   model.nvib_layers=[]   trainer.limit_val_batches=0   loader.num_workers=1   trainer.devices=4    trainer.log_every_n_steps=1
+
+
+
+ CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m main \
+  loader.batch_size=64 \
+  loader.eval_batch_size=32 \
+  data=openwebtext-split \
+  wandb.name=duo-owt-multigpu-test \
+  model=small \
+  algo=duo \
+  model.length=512 \
+  algo.curriculum.mode=poly9 \
+  algo.curriculum.gumbel_tau_log10_start=-3.0 \
+  algo.curriculum.gumbel_tau_log10_end=-3.0 \
+  algo.curriculum.gamma_min=-3.55 \
+  algo.curriculum.gamma_max=-1.85 \
+  algo.curriculum.top_k=2 \
+  algo.curriculum.start=0 \
+  algo.curriculum.end=50 \
+  +shortcut_removal=False \
+  +latent_noise=False \
+  trainer.max_steps=2 \
+  checkpointing.resume_from_ckpt=false \
+  model.nvib_layers=[4,6,8] \
+  trainer.limit_val_batches=2 \
+  loader.num_workers=8 \
+  trainer.devices=4 \
+  trainer.accumulate_grad_batches=2 \
+  trainer.log_every_n_steps=1
+
+
+
+ CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=34000 +shortcut_removal=False  +latent_noise=False trainer.max_steps=81 checkpointing.resume_from_ckpt=false model.nvib_layers=[4,6,8] trainer.val_check_interval=80 trainer.limit_val_batches=1000 trainer.devices=4  loader.num_workers=16

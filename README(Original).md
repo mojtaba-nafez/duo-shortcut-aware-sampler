@@ -50,7 +50,7 @@ This repository contains the code for the two papers in the Diffusion Duality se
 To get started, create a conda environment containing the required dependencies.
 
 ```bash
-conda create -n duo python=3.12
+conda create -n duo python=3.11
 conda activate duo
 conda install nvidia/label/cuda-12.4.0::cuda-toolkit
 pip install -r requirements.txt

@@ -2,7 +2,7 @@ train: openwebtext-train
 valid: openwebtext-valid
 modality: text
 tokenizer_name_or_path: gpt2
-cache_dir: /idiap/temp/mnafez/research/duo/data
+cache_dir: /mnt/home/NLU/duo/data
 wrap: True
 streaming: False
 insert_train_eos: True

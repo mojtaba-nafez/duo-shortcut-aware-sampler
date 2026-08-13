@@ -67,8 +67,15 @@ class Perplexity(NLL):
 class Metrics:
   def __init__(self, gen_ppl_eval_model_name_or_path=None,
                eval_ppl_batch_size=None) -> None:
+    # metrics = torchmetrics.MetricCollection({
+    #     'nll': NLL(), 'bpd': BPD(), 'ppl': Perplexity()})
+    
     metrics = torchmetrics.MetricCollection({
-        'nll': NLL(), 'bpd': BPD(), 'ppl': Perplexity()})
+      'nll': NLL(sync_on_compute=False),
+      'bpd': BPD(sync_on_compute=False),
+      'ppl': Perplexity(sync_on_compute=False),
+    }, compute_groups=False)
+
     metrics.set_dtype(torch.float64)
     self.train_nlls = metrics.clone(prefix='train/')
     self.train_aux = BPD()

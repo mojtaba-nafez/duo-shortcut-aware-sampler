@@ -173,4 +173,10 @@ weights/
 data/
 s-sahoo/
 
+data
+logs-train-slurm/
+our-pretrain-weights/
+outputs
+
+
 

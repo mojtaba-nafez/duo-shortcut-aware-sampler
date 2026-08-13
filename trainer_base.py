@@ -15,6 +15,8 @@ import utils
 
 import time
 import torch
+import math
+import torch.distributed as dist
 
 @dataclass
 class Loss:
@@ -340,11 +342,73 @@ class TrainerBase(L.LightningModule):
     return losses.loss
 
   def on_train_epoch_end(self):
-    # for k, v in self.metrics.valid_nlls.items():
+    #   # for k, v in self.metrics.valid_nlls.items():
     for k, v in self.metrics.train_nlls.items():
-      self.log(name=k, value=v.compute(), on_step=False,
-               on_epoch=True, sync_dist=True)
+        self.log(name=k, value=v.compute(), on_step=False,
+                  on_epoch=True, sync_dist=True)
   
+  # def on_train_epoch_end(self):
+  #   import os
+  #   import time
+  #   import torch
+  #   import torch.distributed as dist
+
+  #   rank = self.global_rank
+  #   path = f"/tmp/epoch_debug_rank{rank}.log"
+
+  #   def mark(msg):
+  #       with open(path, "a", buffering=1) as f:
+  #           f.write(f"{time.time():.6f}  {msg}\n")
+  #           f.flush()
+  #           os.fsync(f.fileno())
+
+  #   mark("A ENTER HOOK")
+
+  #   # Critical test:
+  #   # Is there unfinished CUDA work from the final backward?
+  #   mark("B BEFORE PRE-SYNC")
+  #   torch.cuda.synchronize()
+  #   mark("C AFTER PRE-SYNC")
+
+  #   metric = self.metrics.train_nlls["nll"]
+  #   mark("D GOT METRIC")
+
+  #   stats = torch.stack([
+  #       metric.mean_value.detach(),
+  #       metric.weight.detach(),
+  #   ])
+  #   mark("E STACKED")
+
+  #   mark("F BEFORE ALLREDUCE")
+
+  #   work = dist.all_reduce(
+  #       stats,
+  #       op=dist.ReduceOp.SUM,
+  #       async_op=True,
+  #   )
+
+  #   mark("G ALLREDUCE LAUNCHED")
+
+  #   work.wait()
+  #   mark("H WORK.WAIT RETURNED")
+
+  #   # Force NCCL GPU work to actually complete.
+  #   torch.cuda.synchronize()
+  #   mark("I AFTER ALLREDUCE CUDA SYNC")
+
+  #   global_nll = stats[0] / stats[1]
+  #   mark("J COMPUTED NLL")
+
+  #   mark("K BEFORE RESET")
+  #   self.metrics.train_nlls.reset()
+  #   mark("L RESET RETURNED")
+
+  #   torch.cuda.synchronize()
+  #   mark("M AFTER RESET CUDA SYNC")
+
+  #   mark("N EXIT HOOK")
+
+
   def on_validation_epoch_start(self):
     self.metrics.reset()
     self._eval_mode()

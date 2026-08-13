@@ -194,7 +194,7 @@ def _train(diffusion_model, config, logger, tokenizer):
 
   train_ds, valid_ds = dataloader.get_dataloaders(
     config, tokenizer)
-  
+  '''
   # =================================================
   # DEBUG SMALL TRAINING DATASET
   # =================================================
@@ -221,7 +221,7 @@ def _train(diffusion_model, config, logger, tokenizer):
   print(f"DEBUG DATASET SIZE = {len(small_train_dataset)}")
   print(f"DEBUG NUM BATCHES  = {len(train_ds)}")
   print("====================================")
-
+  '''
 
   _print_batch(config, train_ds, valid_ds, tokenizer)
 

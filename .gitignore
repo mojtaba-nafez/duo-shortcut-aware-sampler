@@ -180,4 +180,11 @@ outputs
 
 
 
+our-cscs-trained-checkpoints/
+
+logs-eval-slurm/
+
+greedy-tail-ablation-result/
+greedy-tail-ablation-mauve-result/
+rand_perturb_exp/
 /our-pretrain-weights

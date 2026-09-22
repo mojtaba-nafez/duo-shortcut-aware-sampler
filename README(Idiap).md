@@ -24,7 +24,8 @@ python -u random_perturbation_experiment.py \
     sampling.psi.low_mode=max-rescale-0.05 \
     sampling.psi.high_frac=0.0 \
     sampling.psi.middle_frac=0.0 \
-    +shortcut_removal=True
+    +shortcut_removal=True \
+    eval.gen_ppl_eval_model_name_or_path="google/gemma-2-9b"
 ```
 
 ## SEDD
@@ -50,11 +51,18 @@ python -u random_perturbation_experiment.py \
     sampling.psi.low_mode=max-rescale-0.05 \
     sampling.psi.high_frac=0.0 \
     sampling.psi.middle_frac=0.0 \
-    +shortcut_removal=True
+    +shortcut_removal=True \
+    eval.gen_ppl_eval_model_name_or_path="google/gemma-2-9b"
 ```
 
 ## DOU
+/idiap/temp/mnafez/research/duo/our-cscs-trained-checkpoints/duo-17B-clean-loss-term/last.ckpt
 
+/idiap/temp/mnafez/research/duo/our-cscs-trained-checkpoints/our-pretrain-weights/duo-17B/last.ckpt
+
+/idiap/temp/mnafez/research/duo/our-cscs-trained-checkpoints/duo-17B-clean-loss-term-time-dependent/last.ckpt
+
+/idiap/temp/mnafez/research/duo/our-cscs-trained-checkpoints/duo-17B-clean-loss-term-time-dependent-0-02/last.ckpt
 
 ```bash
 python -u random_perturbation_experiment.py \
@@ -68,36 +76,22 @@ python -u random_perturbation_experiment.py \
     sampling.steps=256 \
     sampling.p_nucleus=0.9 \
     sampling.num_sample_batches=1 \
-    eval.checkpoint_path="/home/nafez/scratch/duo/weights/duo.ckpt" \
+    eval.checkpoint_path="/idiap/temp/mnafez/research/duo/our-cscs-trained-checkpoints/duo-17B-clean-loss-term-time-dependent-0-02/last.ckpt" \
     loader.eval_batch_size=8 \
     sampling.psi.time_profile=linear \
     sampling.psi.high_mode=max-rescale-0.05 \
     sampling.psi.middle_mode=max-rescale-0.05 \
     sampling.psi.low_mode=max-rescale-0.05 \
     sampling.psi.high_frac=0.0 \
-    sampling.psi.middle_frac=0.0
+    sampling.psi.middle_frac=0.0 \
+    +shortcut_removal=True \
+    +latent_noise=False \
+    +use_trained_scaling_factor=False \
+    +activate_nvib_noise=False \
+    eval.gen_ppl_eval_model_name_or_path="google/gemma-2-9b" \
+    +dataset_path="/idiap/temp/mnafez/research/Score-Entropy-Discrete-Diffusion/owt_valid.txt"
 ```
 
-
-# Running Experiments on the EPFL RCP Cluster
-
-The following example launches a DUO evaluation job using the PSI sampler configuration:
-
-
-```bash
-runai submit \
-  --name duo-rescale \
-  --image registry.rcp.epfl.ch/dllm-sampling/my-toolbox:v0.3 \
-  --gpu 1 \
-  --existing-pvc claimname=course-ee-628-scratch,path=/scratch \
-  --existing-pvc claimname=home,path=/home/mnafez \
-  --command -- bash -c "
-    source /scratch/mnafez/miniconda3/etc/profile.d/conda.sh && \
-    conda activate remdm && \
-    cd /scratch/mnafez/duo && \
-    bash slurm_scripts/psi_samplers/owt/duo_max_rescale_eta.sh
-    "
-```
 
 
 # Eval (Activate Random-Noise or Diagonal-Masking in Middle Layers)
@@ -116,7 +110,8 @@ python main.py \
   sampling.noise_removal=greedy \
   +wandb.offline=true \
   +shortcut_removal=False \
-  +latent_noise=False
+  +latent_noise=False \
+  eval.gen_ppl_eval_model_name_or_path="google/gemma-2-9b"
 ```
 
 
@@ -143,7 +138,8 @@ python -u -m main \
     sampling.psi.high_frac=0.0 \
     sampling.psi.middle_frac=0.0 \
     +shortcut_removal=False \
-    +latent_noise=True
+    +latent_noise=True \
+    eval.gen_ppl_eval_model_name_or_path="google/gemma-2-9b"
 ```
 
 
@@ -165,54 +161,121 @@ python -u -m main \
 ```
 
 
-
-
-
-
+```bash
 sbatch --environment=gidd --nodes=2 -A a0236 --time=0-00:20:00 slurm_scripts/cscs/training/duo_owt_8gpu.sh
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=34000 +shortcut_removal=False  +latent_noise=False trainer.max_steps=68000 checkpointing.resume_from_ckpt=false model.nvib_layers=[4,6,8] trainer.val_check_interval=12000 trainer.limit_val_batches=1000 trainer.devices=1  loader.num_workers=16 +use_trained_scaling_factor=False +activate_nvib_noise=False
+```
 
 
+# Evaluation
 
+## Duo: Base Sampler
 
-<!-- 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=50 +shortcut_removal=False  +latent_noise=False trainer.max_steps=2 checkpointing.resume_from_ckpt=false model.nvib_layers=[] trainer.val_check_interval=15 trainer.limit_val_batches=0 loader.num_workers=16
--->
-
-CUDA_VISIBLE_DEVICES=0,1 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt-debug   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2   algo.curriculum.start=0   algo.curriculum.end=50   +shortcut_removal=False   +latent_noise=False   trainer.max_steps=2   checkpointing.resume_from_ckpt=false   model.nvib_layers=[]   trainer.limit_val_batches=0   loader.num_workers=1   trainer.devices=2   trainer.accumulate_grad_batches=4   trainer.log_every_n_steps=1
-
-
-
- CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt-debug   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2   algo.curriculum.start=0   algo.curriculum.end=50   +shortcut_removal=False   +latent_noise=False   trainer.max_steps=2   checkpointing.resume_from_ckpt=false   model.nvib_layers=[]   trainer.limit_val_batches=0   loader.num_workers=1   trainer.devices=4    trainer.log_every_n_steps=1
-
-
-
- CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m main \
-  loader.batch_size=64 \
-  loader.eval_batch_size=32 \
+```bash
+python main.py \
+  mode=sample_eval \
   data=openwebtext-split \
-  wandb.name=duo-owt-multigpu-test \
-  model=small \
-  algo=duo \
-  model.length=512 \
-  algo.curriculum.mode=poly9 \
-  algo.curriculum.gumbel_tau_log10_start=-3.0 \
-  algo.curriculum.gumbel_tau_log10_end=-3.0 \
-  algo.curriculum.gamma_min=-3.55 \
-  algo.curriculum.gamma_max=-1.85 \
-  algo.curriculum.top_k=2 \
-  algo.curriculum.start=0 \
-  algo.curriculum.end=50 \
+  algo=duo_base \
+  eval.checkpoint_path="/idiap/temp/mnafez/research/duo/our-cscs-trained-checkpoints/duo-17B-clean-loss-term/last.ckpt" \
+  sampling.steps=512 \
+  sampling.noise_removal=greedy \
+  +wandb.offline=true \
   +shortcut_removal=False \
   +latent_noise=False \
-  trainer.max_steps=2 \
-  checkpointing.resume_from_ckpt=false \
+  +use_trained_scaling_factor=False \
+  +activate_nvib_noise=False \
+  model.length=512 \
+  loader.eval_batch_size=8 \
+  loader.batch_size=16 \
+  sampling.num_sample_batches=16 \
+  eval.gen_ppl_eval_model_name_or_path="google/gemma-2-9b"
+```
+
+## Duo: PSI Sampler
+
+```bash
+python -u -m main \
+    mode=sample_eval \
+    data=openwebtext-split \
+    data.cache_dir=/idiap/temp/mnafez/research/duo/data \
+    model=small \
+    algo=duo_base \
+    noise=log-linear \
+    sampling.predictor=psi \
+    sampling.steps=512 \
+    sampling.p_nucleus=0.9 \
+    eval.checkpoint_path=/idiap/temp/mnafez/research/duo/our-cscs-trained-checkpoints/duo-17B-clean-loss-term/last.ckpt \
+    sampling.psi.time_profile=linear \
+    sampling.psi.high_mode=max-rescale-0.05 \
+    sampling.psi.middle_mode=max-rescale-0.05 \
+    sampling.psi.low_mode=max-rescale-0.05 \
+    sampling.psi.high_frac=0.0 \
+    sampling.psi.middle_frac=0.0 \
+    +shortcut_removal=False \
+    +latent_noise=False \
+    +use_trained_scaling_factor=False \
+    +activate_nvib_noise=False \
+    model.length=512 \
+    sampling.num_sample_batches=16 \
+    loader.eval_batch_size=8 \
+    eval.gen_ppl_eval_model_name_or_path="google/gemma-2-9b"
+```
+
+
+## Duo + NVIB: Base Sampler
+
+```bash
+python main.py \
+  mode=sample_eval \
+  data=openwebtext-split \
+  algo=duo_base \
+  eval.checkpoint_path=/idiap/temp/mnafez/research/duo/our-cscs-trained-checkpoints/our-pretrain-weights/gidd-nvib-17B/last.ckpt \
+  sampling.steps=512 \
+  sampling.noise_removal=greedy \
+  +wandb.offline=true \
   model.nvib_layers=[4,6,8] \
-  trainer.limit_val_batches=2 \
-  loader.num_workers=8 \
-  trainer.devices=4 \
-  trainer.accumulate_grad_batches=2 \
-  trainer.log_every_n_steps=1
+  +shortcut_removal=False \
+  +latent_noise=False \
+  +use_trained_scaling_factor=True \
+  +activate_nvib_noise=False \
+  model.length=512 \
+  loader.eval_batch_size=8 \
+  loader.batch_size=16 \
+  sampling.num_sample_batches=16 \
+  eval.gen_ppl_eval_model_name_or_path="google/gemma-2-9b"
+```
 
 
+## Duo + NVIB: PSI Sampler
 
- CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m main   loader.batch_size=64   loader.eval_batch_size=32   data=openwebtext-split   wandb.name=duo-owt   model=small   algo=duo   model.length=512   algo.curriculum.mode=poly9   algo.curriculum.gumbel_tau_log10_start=-3.0   algo.curriculum.gumbel_tau_log10_end=-3.0   algo.curriculum.gamma_min=-3.55   algo.curriculum.gamma_max=-1.85   algo.curriculum.top_k=2 algo.curriculum.start=0   algo.curriculum.end=34000 +shortcut_removal=False  +latent_noise=False trainer.max_steps=81 checkpointing.resume_from_ckpt=false model.nvib_layers=[4,6,8] trainer.val_check_interval=80 trainer.limit_val_batches=1000 trainer.devices=4  loader.num_workers=16
+```bash
+python -u -m main \
+    mode=sample_eval \
+    data=openwebtext-split \
+    data.cache_dir=/idiap/temp/mnafez/research/duo/data \
+    model=small \
+    algo=duo_base \
+    noise=log-linear \
+    sampling.predictor=psi \
+    sampling.steps=512 \
+    sampling.p_nucleus=0.9 \
+    eval.checkpoint_path=/idiap/temp/mnafez/research/duo/our-cscs-trained-checkpoints/our-pretrain-weights/gidd-nvib-17B/last.ckpt \
+    sampling.psi.time_profile=linear \
+    sampling.psi.high_mode=max-rescale-0.05 \
+    sampling.psi.middle_mode=max-rescale-0.05 \
+    sampling.psi.low_mode=max-rescale-0.05 \
+    sampling.psi.high_frac=0.0 \
+    sampling.psi.middle_frac=0.0 \
+    model.nvib_layers=[4,6,8] \
+    +shortcut_removal=False \
+    +latent_noise=False \
+    +use_trained_scaling_factor=True \
+    +activate_nvib_noise=False \
+    model.length=512 \
+    sampling.num_sample_batches=16 \
+    loader.eval_batch_size=8 \
+    eval.gen_ppl_eval_model_name_or_path="google/gemma-2-9b"
+```

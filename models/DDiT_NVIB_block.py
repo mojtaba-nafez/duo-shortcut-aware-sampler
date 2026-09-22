@@ -295,15 +295,19 @@ class DDiT_NVIB_Block(nn.Module):
 
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * self.scaling
     pi_clamped = torch.clamp(pi, min=torch.finfo(pi.dtype).tiny)
-    if self.training or use_trained_scaling_factor:
-      exp_scale =  0.2
-    else:
-      exp_scale = 0.04
-    log_pi = torch.log(pi_clamped).permute(0, 2, 1).unsqueeze(1)  # (B, 1, 1, Nl)
+    # if self.training or use_trained_scaling_factor:
+    #   exp_scale =  0.2
+    # else:
+    #   exp_scale = 0.04
+
+    # log_pi = torch.log(pi_clamped).permute(0, 2, 1).unsqueeze(1)  # (B, 1, 1, Nl)
+    log_pi = pi_clamped.permute(0, 2, 1).unsqueeze(1)  # (B, 1, 1, Nl)
+    
     l2_norm = (torch.norm(input_for_kv, dim=-1, keepdim=True) ** 2)  # (B, Nl, 1)
     l2_norm = l2_norm.permute(0, 2, 1).unsqueeze(1)  # (B, 1, 1, Nl)
     scale_factor = 1.0 / (2.0 * math.sqrt(self.head_dim))
-    attn_weights = attn_weights + log_pi - (scale_factor * l2_norm * exp_scale)
+    # attn_weights = attn_weights + log_pi - (scale_factor * l2_norm * exp_scale)
+    attn_weights = attn_weights + log_pi - (scale_factor * l2_norm)
 
     if remove_self_attn and self.layer_number > 6:
         idx = torch.arange(seq_len, device=attn_weights.device)

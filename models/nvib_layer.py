@@ -74,7 +74,7 @@ class SoftplusActivation(nn.Module):
     Ensures positive outputs but avoids exploding values like exp()
     """
 
-    def __init__(self, beta=1.0, threshold=20.0):
+    def __init__(self, beta=1.0, threshold=20.0,):
         """
         Args:
             beta (float): controls the sharpness (default 1.0)
@@ -84,7 +84,7 @@ class SoftplusActivation(nn.Module):
         self.beta = beta
         self.threshold = threshold
 
-    def forward(self, x):
+    def forward(self, x, use_trained_scaling_factor=False):
         # PyTorch's softplus is numerically stable
         return torch.nn.functional.softplus(x, beta=self.beta, threshold=self.threshold)
 
@@ -180,8 +180,8 @@ class NVIB(nn.Module):
         self.size_in = size_in
         self.size_out = size_out
         self.d = int(size_in / nheads)  # dimension of the head
-        # self.alpha_activation = SoftplusActivation()  # projection for alphas
-        self.alpha_activation = Exponential()  # projection for alphas
+        self.alpha_activation = SoftplusActivation()  # projection for alphas
+        # self.alpha_activation = Exponential()  # projection for alphas
         # self.alpha_activation = eluplus1()  # projection for alphas
         self.mu_proj = nn.Linear(size_in, size_out)  # Project to mean
         self.logvar_proj = nn.Linear(size_in, size_out)  # Project log variance

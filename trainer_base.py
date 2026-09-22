@@ -86,6 +86,14 @@ class TrainerBase(L.LightningModule):
     vocab_size=None):
     super().__init__()
     self.shortcut_removal = config.shortcut_removal
+    self.use_trained_scaling_factor = getattr(config, 'use_trained_scaling_factor', False)
+    self.activate_nvib_noise = getattr(config, 'activate_nvib_noise', False)
+    self.clean_conf_lambda = getattr(config.algo, 'clean_conf_lambda', 0.0)  # 0 = off, exact current behavior
+    print("self.clean_conf_lambda", self.clean_conf_lambda)
+    self.clean_conf_time_power = getattr(config.algo, 'clean_conf_time_power', 0.0)  # 0 = flat (matches what you already have)
+    self.clean_conf_t_threshold = getattr(config.algo, 'clean_conf_t_threshold', 0.7)  # 1.0 = never gates off
+
+
     self.latent_noise = config.latent_noise
     self.save_hyperparameters()
     self.config = config
@@ -298,7 +306,7 @@ class TrainerBase(L.LightningModule):
     with torch.amp.autocast('cuda', dtype=torch.float32):
       model_output = self.backbone(
         x=nn_input_idxs, sigma=sigma, class_cond=labels, 
-        weights=weights, mask_embedding_blending=self.shortcut_removal, remove_self_attn=self.shortcut_removal, latent_noise=self.latent_noise, kl_loss=kl_loss)
+        weights=weights, mask_embedding_blending=self.shortcut_removal, remove_self_attn=self.shortcut_removal, latent_noise=self.latent_noise, kl_loss=kl_loss, use_trained_scaling_factor=self.use_trained_scaling_factor, activate_nvib_noise=self.activate_nvib_noise)
     return self._process_model_output(
       model_output=model_output, xt=xt, sigma=sigma)
 
@@ -317,11 +325,18 @@ class TrainerBase(L.LightningModule):
     # self.metrics.update_train(losses.nlls, losses.prior_loss, losses.num_tokens, losses.kl_gaussian, losses.kl_dirichlet)        
     self.metrics.update_train(losses.nlls, losses.prior_loss, losses.num_tokens)
     batch_size = batch['input_ids'].shape[0]
+
+    if self.trainer.is_global_zero and ((batch_idx % 500) == 0):
+      print(f'step={self.global_step} batch_idx={batch_idx} '
+        f'loss={losses.loss.item():.4f}', flush=True)
+
+
     self.log(name='trainer/loss',
              value=losses.loss.item(),
              on_step=True,
              on_epoch=False,
-             sync_dist=True)
+             sync_dist=True,
+             prog_bar=True)
     self.log(
         'train/kl_gaussian',
         losses.kl_gaussian.detach(),
@@ -596,6 +611,23 @@ class Diffusion(TrainerBase):
   def _process_model_input(self, x0, valid_tokens):
     return x0, None, valid_tokens
 
+  def _clean_confidence_loss(self, log_x_theta, xt, x0, t):
+    """Directly supervises confidence in x0 exactly at the positions where nll_per_token's
+    own kappa_t coefficient vanishes as alpha_t -> 1 (see term2_coefs/term2_offset) -- reuses
+    the log_x_theta already computed for the main loss, no extra forward pass.
+
+    Time-weighted and gated the same way as the UDLM version: (1-t) ~0 at high noise (early
+    in generation), ~1 at low noise (late in generation). clean_conf_time_power=0 and
+    clean_conf_t_threshold=1.0 (the defaults) recover the original flat version exactly.
+    t is (B,) -- one value per training example -- so the gate is a per-example mask, not
+    a Python `if`.
+    """
+    is_clean = (xt == x0).float()
+    logp_x0 = log_x_theta.gather(-1, x0[:, :, None]).squeeze(-1)
+    active = (t < self.clean_conf_t_threshold).float()
+    time_weight = (1. - t).clamp(min=0.) ** self.clean_conf_time_power
+    return (active * time_weight)[:, None] * is_clean * (-logp_x0)
+
   def _process_sigma(self, sigma):
     assert sigma.ndim == 2
     sigma = sigma.mean(-1).squeeze()
@@ -671,6 +703,19 @@ class Diffusion(TrainerBase):
                            self.num_classes, labels)
     else:
       assert labels is None
+    
+
+    log_x_theta = self.forward(xt, sigma=sigma, labels=labels, kl_loss=True)
+    utils.print_nans(log_x_theta, 'model_output')
+    loss = self.nll_per_token(
+      log_x_theta=log_x_theta, xt=xt, x0=x0, alpha_t=alpha_t, dalpha_t=dalpha_t,
+      low_var=train_mode and self.loss_type == 'low_var')
+
+    if self.clean_conf_lambda > 0 and train_mode:
+      loss = loss + self.clean_conf_lambda * self._clean_confidence_loss(log_x_theta, xt, x0, t)
+
+    return loss
+    '''
     log_x_theta = self.forward(xt, sigma=sigma, labels=labels, kl_loss=True)
     utils.print_nans(log_x_theta, 'model_output')
     return self.nll_per_token(
@@ -680,7 +725,8 @@ class Diffusion(TrainerBase):
       alpha_t=alpha_t,
       dalpha_t=dalpha_t,
       low_var=train_mode and self.loss_type == 'low_var')
-
+    '''
+  
   def _get_score(self, **kwargs):
     del kwargs
     raise NotImplementedError
